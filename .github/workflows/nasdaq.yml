@@ -39,4 +39,3 @@ jobs:
           git add nasdaqlisted.txt otherlisted.txt
           git commit -m "Update Nasdaq lists" || echo "No changes"
           git push
-
