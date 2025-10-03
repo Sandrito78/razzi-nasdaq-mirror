@@ -2,8 +2,8 @@ name: Nasdaq Mirror
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # ogni 5 minuti
-  workflow_dispatch:        # avvio manuale
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 jobs:
   fetch:
@@ -25,11 +25,10 @@ jobs:
                  "$url" -o "$out"
           }
 
-          # HTTPS (no FTP)
           download "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" nasdaqlisted.txt
           download "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"   otherlisted.txt
 
-          # sanity check: i file veri sono > 50 KB
+          # file veri devono pesare > 50 KB
           test $(wc -c < nasdaqlisted.txt) -gt 50000
           test $(wc -c < otherlisted.txt)   -gt 50000
 
@@ -40,3 +39,4 @@ jobs:
           git add nasdaqlisted.txt otherlisted.txt
           git commit -m "Update Nasdaq lists" || echo "No changes"
           git push
+
