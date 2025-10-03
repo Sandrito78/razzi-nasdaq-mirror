@@ -3,24 +3,88 @@ name: Nasdaq Mirror
 on:
   schedule:
     - cron: "*/5 * * * *"   # ogni 5 minuti
-  workflow_dispatch:        # per avviarlo anche a mano
+  workflow_dispatch:        # avvio manuale
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Download nasdaqlisted.txt
+      - name: Download lists (robusto con fallback)
+        shell: bash
         run: |
-          curl -s -L "http://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" -o nasdaqlisted.txt
-          curl -s -L "http://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" -o otherlisted.txt
+          set -u
+          UA="curl/8.0 RazziBot"
+          RETRY="--retry 2 --retry-delay 1 --retry-all-errors"
+          CT="--connect-timeout 5"
+          MT="--max-time 25"
+          COMMON="--fail -sSL ${RETRY} ${CT} ${MT} -A \"$UA\""
+
+          fetch_with_fallback () {
+            local out="$1"; shift
+            local ok=1
+            for u in "$@"; do
+              echo "→ Provo: $u"
+              # scarico su tmp
+              if curl ${COMMON} "$u" -o "$out.tmp"; then
+                # scarto HTML/redirect pages
+                if grep -qiE '<html|<!doctype html' "$out.tmp"; then
+                  echo "   ricevuto HTML, continuo ai fallback…"
+                  continue
+                fi
+                # verifica minima (header tipici presenti)
+                if head -n 1 "$out.tmp" | grep -qiE 'symbol|security'; then
+                  mv -f "$out.tmp" "$out"
+                  echo "✓ Ok: $out da $u"
+                  ok=0
+                  break
+                else
+                  echo "   formato inatteso, continuo…"
+                fi
+              else
+                echo "   errore curl ($?) su $u, continuo…"
+              fi
+            done
+            rm -f "$out.tmp" 2>/dev/null || true
+            return $ok
+          }
+
+          # Candidati (maiuscole/minuscole e host diversi)
+          L_NASDQ=(
+            "http://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt"
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt"
+            "https://www.nasdaqtrader.com/files/symboldirectory/nasdaqlisted.txt"
+            "https://www.nasdaqtrader.com/Trader.aspx?id=SymbolDirectory/nasdaqlisted.txt"
+            "https://www.nasdaqtrader.com/Trader.aspx?id=symboldirectory/nasdaqlisted.txt"
+          )
+          L_OTHER=(
+            "http://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt"
+            "https://www.nasdaqtrader.com/files/symboldirectory/otherlisted.txt"
+            "https://www.nasdaqtrader.com/Trader.aspx?id=SymbolDirectory/otherlisted.txt"
+            "https://www.nasdaqtrader.com/Trader.aspx?id=symboldirectory/otherlisted.txt"
+          )
+
+          # Scarica con fallback; non fallire il job se un file manca: segnalo ma continuo
+          set +e
+          fetch_with_fallback nasdaqlisted.txt "${L_NASDQ[@]}"
+          got_a=$?
+          fetch_with_fallback otherlisted.txt "${L_OTHER[@]}"
+          got_b=$?
+          set -e
+
+          # se almeno uno è arrivato bene, proseguo
+          if [[ $got_a -ne 0 && $got_b -ne 0 ]]; then
+            echo "Nessun file scaricato correttamente (nasdaq), esco con errore."
+            exit 1
+          fi
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add nasdaqlisted.txt otherlisted.txt
+          git add nasdaqlisted.txt otherlisted.txt || true
           git commit -m "Update Nasdaq lists" || echo "No changes"
           git push
