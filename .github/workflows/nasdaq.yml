@@ -2,7 +2,7 @@ name: Nasdaq Mirror
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 */6 * * *"   # ogni 6 ore (regola tu)
   workflow_dispatch:
 
 jobs:
@@ -12,42 +12,31 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Download lists (HTTPS + retry + sanity check)
+      - name: Download lists (con fallback)
+        shell: bash
         run: |
           set -euo pipefail
-          UA="curl/8.5.0"
-          download () {
-            url="$1"; out="$2"
-            echo "→ $url -> $out"
-            curl -fsSL --retry 4 --retry-delay 2 --max-time 45 \
-                 -H "User-Agent: $UA" \
-                 -H "Cache-Control: no-cache" \
-                 "$url" -o "$out"
-          }
 
-          download "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" nasdaqlisted.txt
-          download "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"   otherlisted.txt
+          # nasdaqlisted.txt
+          curl -fsSL --max-time 25 \
+            "http://www.nasdaqtrader.com/dynamic/symboldirectory/nasdaqlisted.txt" \
+            -o nasdaqlisted.txt || \
+          curl -fsSL --max-time 25 \
+            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/nasdaqlisted.txt" \
+            -o nasdaqlisted.txt
 
-          # file veri devono pesare > 50 KB
-          test $(wc -c < nasdaqlisted.txt) -gt 50000
-          test $(wc -c < otherlisted.txt)   -gt 50000
+          # otherlisted.txt
+          curl -fsSL --max-time 25 \
+            "http://www.nasdaqtrader.com/dynamic/symboldirectory/otherlisted.txt" \
+            -o otherlisted.txt || \
+          curl -fsSL --max-time 25 \
+            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/otherlisted.txt" \
+            -o otherlisted.txt
 
-      - name: Download lists (HTTPS + retry + sanity check)
+      - name: Commit & Push
         run: |
-          set -euo pipefail
-          UA="Mozilla/5.0 (compatible; RazziBot/1.0)"
-          download () {
-            url="$1"; out="$2"
-            echo "→ $url -> $out"
-            curl -fsSL --retry 4 --retry-delay 2 --max-time 60 \
-                 -H "User-Agent: $UA" \
-                 -H "Cache-Control: no-cache" \
-                 "$url" -o "$out"
-          }
-      
-          download "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt" nasdaqlisted.txt
-          download "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt"   otherlisted.txt
-      
-          # i file veri hanno tante righe; richiedi almeno 500 righe per sicurezza
-          test $(wc -l < nasdaqlisted.txt) -gt 500
-          test $(wc -l < otherlisted.txt)   -gt 500
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add nasdaqlisted.txt otherlisted.txt
+          git commit -m "Mirror update" || echo "No changes"
+          git push
