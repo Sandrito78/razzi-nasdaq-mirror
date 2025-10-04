@@ -20,43 +20,57 @@ jobs:
       - name: Download lists (mirror-first con fallback e retry)
         shell: bash
         run: |
-          set -eo pipefail
+          # niente -e qui: non vogliamo abortire il passo per un singolo curl
+          set -u -o pipefail
           mkdir -p data
-  
+
           fetch() {
             local out="$1"; shift
-            # prova ciascun URL con timeout e retry
+            local tmp="$out.tmp"
+            : > "$tmp" || true
+
             for u in "$@"; do
-              echo "Provo $u"
-              if curl -fsSL --connect-timeout 10 --max-time 90 \
-                   --retry 3 --retry-all-errors \
-                   -H 'User-Agent: Mozilla/5.0' -H 'Accept: text/plain' \
-                   "$u" -o "$out.tmp"; then
-                # controllo che il file sembri valido (contiene "|")
-                if grep -qE '(^Symbol\|Security Name)|\|' "$out.tmp"; then
-                  mv "$out.tmp" "$out"
-                  echo "OK da $u"
-                  return 0
+              echo "➡️  Provo $u"
+              # retry “manuale” + curl retry per robustezza
+              for i in 1 2 3; do
+                # NB: niente -f; intercettiamo noi l'errore
+                if curl -sS --connect-timeout 10 --max-time 90 \
+                     --retry 3 --retry-all-errors \
+                     -H 'User-Agent: Mozilla/5.0' -H 'Accept: text/plain' \
+                     "$u" -o "$tmp"; then
+                  # Valida: deve avere almeno qualche '|' o l'header
+                  if grep -qE '(^Symbol\|Security Name)|\|' "$tmp"; then
+                    mv "$tmp" "$out"
+                    echo "✅ OK da $u → salvato in $out"
+                    return 0
+                  else
+                    echo "⚠️  Contenuto non valido da $u (niente pipe). Ritento/altro URL…"
+                  fi
+                else
+                  rc=$?
+                  echo "❌ curl fallito (rc=$rc) da $u (tentativo $i/3)."
                 fi
-              fi
+                sleep 2
+              done
             done
-            rm -f "$out.tmp" 2>/dev/null || true
-            echo "⚠️ Tutte le sorgenti fallite per $out (mantengo il file precedente se esiste)"
-            # non fallisce il job: continua comunque
+
+            rm -f "$tmp" 2>/dev/null || true
+            echo "⚠️  Tutte le sorgenti fallite per $out. Mantengo file precedente se esiste."
+            # NON fallire lo step
             return 0
           }
-  
-          # nasdaqlisted
+
+          # nasdaqlisted prima dal tuo mirror, poi Nasdaq
           fetch data/nasdaqlisted.txt \
             "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/nasdaqlisted.txt" \
-            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" \
-            "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt"
-  
-          # otherlisted
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt" \
+            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt"
+
+          # otherlisted idem
           fetch data/otherlisted.txt \
             "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/otherlisted.txt" \
-            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" \
-            "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt"
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt" \
+            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"
 
 
       - name: Commit & Push (safe rebase)
