@@ -22,16 +22,6 @@ jobs:
       - name: Debug – mostra workflow caricato
         run: sed -n '1,220p' .github/workflows/nasdaq.yml
 
-      - name: Debug – cerca ftp nel workflow
-        run: |
-          echo "🔎 Cerco 'ftp.nasdaqtrader.com' nel workflow…"
-          if grep -R "ftp.nasdaqtrader.com" -n .github/workflows/nasdaq.yml; then
-            echo "❌ TROVATO ftp.nasdaqtrader.com nel file: rimuovilo!"
-            exit 1
-          else
-            echo "✅ Nessun ftp nel workflow"
-          fi
-
       # === DOWNLOAD LISTE: mirror RAW GitHub -> fallback www.nasdaqtrader.com con Referer ===
       - name: Download lists (mirror-first con fallback e retry)
         shell: bash
