@@ -1,42 +1,31 @@
 name: Nasdaq Mirror
 
 on:
+  workflow_dispatch:   # permette di lanciarlo manualmente
   schedule:
-    - cron: "0 */6 * * *"   # ogni 6 ore (regola tu)
-  workflow_dispatch:
+    - cron: '0 */6 * * *'   # gira ogni 6 ore
 
 jobs:
-  fetch:
+  mirror:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Download lists (con fallback)
-        shell: bash
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Fetch Nasdaq Listed
         run: |
-          set -euo pipefail
+          curl -s https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt -o nasdaqlisted.txt
+          curl -s https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt -o otherlisted.txt
 
-          # nasdaqlisted.txt
-          curl -fsSL --max-time 25 \
-            "http://www.nasdaqtrader.com/dynamic/symboldirectory/nasdaqlisted.txt" \
-            -o nasdaqlisted.txt || \
-          curl -fsSL --max-time 25 \
-            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/nasdaqlisted.txt" \
-            -o nasdaqlisted.txt
-
-          # otherlisted.txt
-          curl -fsSL --max-time 25 \
-            "http://www.nasdaqtrader.com/dynamic/symboldirectory/otherlisted.txt" \
-            -o otherlisted.txt || \
-          curl -fsSL --max-time 25 \
-            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/otherlisted.txt" \
-            -o otherlisted.txt
-
-      - name: Commit & Push
+      - name: Commit and push if changed
         run: |
-          git config user.name  "github-actions"
-          git config user.email "actions@github.com"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
           git add nasdaqlisted.txt otherlisted.txt
-          git commit -m "Mirror update" || echo "No changes"
+          git diff --cached --quiet || git commit -m "Update Nasdaq lists"
           git push
