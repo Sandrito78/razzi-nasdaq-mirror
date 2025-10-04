@@ -87,6 +87,8 @@ jobs:
           echo "📦 Dimensioni finali:"
           ls -lh data/*.txt || true
 
+      - name: Debug – mostro nasdaq.yml
+        run: sed -n '1,180p' .github/workflows/nasdaq.yml
 
       - name: Commit & Push (safe rebase)
         shell: bash
