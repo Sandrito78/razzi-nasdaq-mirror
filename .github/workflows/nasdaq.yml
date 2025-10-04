@@ -33,61 +33,59 @@ jobs:
             echo
           done
 
-
       - name: Download lists (mirror-first con fallback e retry)
         shell: bash
+        continue-on-error: true
         run: |
-          # niente -e qui: non vogliamo abortire il passo per un singolo curl
           set -u -o pipefail
           mkdir -p data
 
           fetch() {
             local out="$1"; shift
-            local tmp="$out.tmp"
-            : > "$tmp" || true
 
             for u in "$@"; do
               echo "➡️  Provo $u"
-              # retry “manuale” + curl retry per robustezza
-              for i in 1 2 3; do
-                # NB: niente -f; intercettiamo noi l'errore
-                if curl -sS --connect-timeout 10 --max-time 90 \
-                     --retry 3 --retry-all-errors \
-                     -H 'User-Agent: Mozilla/5.0' -H 'Accept: text/plain' \
-                     "$u" -o "$tmp"; then
-                  # Valida: deve avere almeno qualche '|' o l'header
-                  if grep -qE '(^Symbol\|Security Name)|\|' "$tmp"; then
-                    mv "$tmp" "$out"
-                    echo "✅ OK da $u → salvato in $out"
-                    return 0
-                  else
-                    echo "⚠️  Contenuto non valido da $u (niente pipe). Ritento/altro URL…"
-                  fi
+              # Opzioni comuni
+              UA=(-H 'User-Agent: Mozilla/5.0' -H 'Accept: text/plain')
+              TIME=(--connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors)
+
+              # Per i link www.nasdaqtrader.com serve un Referer "valido"
+              EXTRA=()
+              if [[ "$u" == *"www.nasdaqtrader.com"* ]]; then
+                EXTRA=(-e 'https://www.nasdaqtrader.com/Trader.aspx?id=SymbolDirectory')
+              fi
+
+              if curl -fsSL "${TIME[@]}" "${UA[@]}" "${EXTRA[@]}" "$u" -o "$out.tmp"; then
+                # Controllo: pipe-delimited o header "Symbol|"
+                if grep -qE '(^Symbol\|Security Name)|\|' "$out.tmp"; then
+                  mv "$out.tmp" "$out"
+                  echo "✅ OK da $u"
+                  return 0
                 else
-                  rc=$?
-                  echo "❌ curl fallito (rc=$rc) da $u (tentativo $i/3)."
+                  echo "⚠️  Contenuto non pipe-delimited da $u (probabile HTML)"
                 fi
-                sleep 2
-              done
+              else
+                echo "❌ curl fallita per $u"
+              fi
             done
 
-            rm -f "$tmp" 2>/dev/null || true
-            echo "⚠️  Tutte le sorgenti fallite per $out. Mantengo file precedente se esiste."
-            # NON fallire lo step
+            rm -f "$out.tmp" 2>/dev/null || true
+            echo "⚠️  Tutte le sorgenti fallite per $out (se esiste, lascio il file com'era)"
             return 0
           }
 
-          # nasdaqlisted prima dal tuo mirror, poi Nasdaq
+          # --- nasdaqlisted: mirror → www (NO ftp) ---
           fetch data/nasdaqlisted.txt \
             "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/nasdaqlisted.txt" \
-            "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt" \
-            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt"
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt"
 
-          # otherlisted idem
+          # --- otherlisted: mirror → www (NO ftp) ---
           fetch data/otherlisted.txt \
             "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/otherlisted.txt" \
-            "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt" \
-            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt"
+
+          echo "📦 Dimensioni finali:"
+          ls -lh data/*.txt || true
 
 
       - name: Commit & Push (safe rebase)
