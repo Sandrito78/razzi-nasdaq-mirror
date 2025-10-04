@@ -1,41 +1,40 @@
 name: Nasdaq Mirror
 
 on:
-  workflow_dispatch:       # avvio manuale
+  workflow_dispatch:        # avvio manuale
   schedule:
-    - cron: "0 */6 * * *"  # ogni 6 ore (riduci lo spam; cambia se vuoi)
+    - cron: "0 */6 * * *"   # ogni 6 ore (aggiusta se vuoi)
 
 permissions:
-  contents: write          # << chiave: serve per poter fare push
+  contents: write           # serve per poter fare push
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Debug – curl -I
-        run: |
-          set -u -o pipefail
-          for u in \
-            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/nasdaqlisted.txt" \
-            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/otherlisted.txt" \
-            "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt" \
-            "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt" \
-            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" \
-            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"
-          do
-            echo ">>> $u"
-            curl -I --connect-timeout 10 --max-time 20 "$u" || echo "(fallito)"
-            echo
-          done
 
-            - name: Download lists (mirror-first con fallback e retry)
+      # === DEBUG: assicuriamoci che stia girando questo file ===
+      - name: Debug – mostra workflow caricato
+        run: sed -n '1,220p' .github/workflows/nasdaq.yml
+
+      - name: Debug – cerca ftp nel workflow
+        run: |
+          echo "🔎 Cerco 'ftp.nasdaqtrader.com' nel workflow…"
+          if grep -R "ftp.nasdaqtrader.com" -n .github/workflows/nasdaq.yml; then
+            echo "❌ TROVATO ftp.nasdaqtrader.com nel file: rimuovilo!"
+            exit 1
+          else
+            echo "✅ Nessun ftp nel workflow"
+          fi
+
+      # === DOWNLOAD LISTE: mirror RAW GitHub -> fallback www.nasdaqtrader.com con Referer ===
+      - name: Download lists (mirror-first con fallback e retry)
         shell: bash
-        continue-on-error: true
         run: |
           set -u -o pipefail
           mkdir -p data
@@ -47,7 +46,7 @@ jobs:
               UA=(-H 'User-Agent: Mozilla/5.0' -H 'Accept: text/plain')
               TIME=(--connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors)
               EXTRA=()
-              # Per www.nasdaqtrader.com serve un Referer valido
+              # www.nasdaqtrader.com richiede un Referer valido
               if [[ "$u" == *"www.nasdaqtrader.com"* ]]; then
                 EXTRA=(-e 'https://www.nasdaqtrader.com/Trader.aspx?id=SymbolDirectory')
               fi
@@ -65,6 +64,7 @@ jobs:
             done
             rm -f "$out.tmp" 2>/dev/null || true
             echo "⚠️  Tutte le sorgenti fallite per $out (se esiste, lascio il file com'era)"
+            # non falliamo il job: può non esserci un update oggi
             return 0
           }
 
@@ -81,43 +81,27 @@ jobs:
           echo "📦 Dimensioni finali:"
           ls -lh data/*.txt || true
 
-            - name: Debug – mostra workflow caricato
-        run: sed -n '1,220p' .github/workflows/nasdaq.yml
-
-      - name: Debug – cerca ftp nel workflow
-        run: |
-          echo "🔎 Cerco 'ftp.nasdaqtrader.com' nel workflow…"
-          if grep -R "ftp.nasdaqtrader.com" -n .github/workflows/nasdaq.yml; then
-            echo "❌ TROVATO ftp.nasdaqtrader.com nel file: rimuovilo!"
-            exit 1
-          else
-            echo "✅ Nessun ftp nel workflow"
-          fi
-
+      # === COMMIT & PUSH con rebase sicuro ===
       - name: Commit & Push (safe rebase)
         shell: bash
         run: |
           set -euo pipefail
-  
-          # Config Git
+
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config pull.rebase true
-  
-          # Aggiungi solo se ci sono cambi
+
           git add -A
           if git diff --cached --quiet; then
             echo "Nessuna modifica da committare."
             exit 0
           fi
-  
+
           git commit -m "Mirror update"
-  
-          # Evita rifiuti per divergenze: rebase sul main remoto
+
           git fetch origin main
           git rebase origin/main
-  
-          # Push con piccolo retry in caso di race
+
           n=0
           until [ $n -ge 3 ]; do
             if git push origin HEAD:main; then
@@ -125,10 +109,10 @@ jobs:
               exit 0
             fi
             n=$((n+1))
-            echo "Push fallito (tentativo $n). Pull --rebase e ritento..."
+            echo "Push fallito (tentativo $n). Pull --rebase e ritento…"
             git pull --rebase origin main || true
             sleep 2
           done
-  
+
           echo "Push fallito dopo 3 tentativi."
           exit 1
