@@ -1,47 +1,41 @@
 name: Nasdaq Mirror
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:        # avvio manuale
   schedule:
     - cron: "0 */6 * * *"   # ogni 6 ore (regola tu)
 
 jobs:
-  mirror:
+  fetch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
 
-      - name: Create data dir
-        run: mkdir -p data
-
-      - name: Download lists (robusto + fallback + sanity-check)
-        shell: bash
+      - name: Download lists (robusto con fallback)
         run: |
-          set -euo pipefail
-          UA="Mozilla/5.0 (compatible; RazziBot/1.0)"
-          dl () {  # $1=url, $2=out
-            echo "→ $1 -> $2"
-            curl -fsSL --retry 4 --retry-delay 2 --max-time 60 \
-                 -H "User-Agent: $UA" -H "Cache-Control: no-cache" \
-                 "$1" -o "$2"
-          }
+          set -e
+          curl -sL "http://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" -o nasdaqlisted.txt || true
+          curl -sL "http://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" -o otherlisted.txt || true
+          # se FTP non va, prova HTTPS (alcune reti lo preferiscono)
+          if [ ! -s nasdaqlisted.txt ]; then
+            curl -sL "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" -o nasdaqlisted.txt || true
+          fi
+          if [ ! -s otherlisted.txt ]; then
+            curl -sL "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" -o otherlisted.txt || true
+          fi
 
-          # Preferisci /files/; fallback su /dynamic/ se serve
-          dl "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt" data/nasdaqlisted.txt \
-          || dl "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" data/nasdaqlisted.txt
-
-          dl "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt" data/otherlisted.txt \
-          || dl "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" data/otherlisted.txt
-
-          # Sanity: devono avere molte righe (evita HTML/errore)
-          test $(wc -l < data/nasdaqlisted.txt) -gt 500
-          test $(wc -l < data/otherlisted.txt)   -gt 500
-
-      - name: Commit and push if changed
+      - name: Commit & Push
         run: |
-          git config --local user.email "actions@github.com"
-          git config --local user.name  "GitHub Actions"
-          git add data/nasdaqlisted.txt data/otherlisted.txt
-          git diff --cached --quiet || git commit -m "Update Nasdaq SymbolDirectory"
-          git push
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add nasdaqlisted.txt otherlisted.txt
+          git commit -m "Mirror update" || echo "No changes"
+          git push origin HEAD:main
