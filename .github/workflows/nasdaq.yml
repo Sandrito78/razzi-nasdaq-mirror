@@ -25,15 +25,41 @@ jobs:
           curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt"  -o data/nasdaqlisted.txt
           curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"   -o data/otherlisted.txt
 
-      - name: Commit & Push (if changed)
+      - name: Commit & Push (safe rebase)
         shell: bash
         run: |
-          set -e
-          if git diff --quiet --exit-code -- data/ ; then
-            echo "No changes."; exit 0
-          fi
+          set -euo pipefail
+  
+          # Config Git
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/nasdaqlisted.txt data/otherlisted.txt
-          git commit -m "Mirror update $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          git push
+          git config pull.rebase true
+  
+          # Aggiungi solo se ci sono cambi
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica da committare."
+            exit 0
+          fi
+  
+          git commit -m "Mirror update"
+  
+          # Evita rifiuti per divergenze: rebase sul main remoto
+          git fetch origin main
+          git rebase origin/main
+  
+          # Push con piccolo retry in caso di race
+          n=0
+          until [ $n -ge 3 ]; do
+            if git push origin HEAD:main; then
+              echo "Push riuscito."
+              exit 0
+            fi
+            n=$((n+1))
+            echo "Push fallito (tentativo $n). Pull --rebase e ritento..."
+            git pull --rebase origin main || true
+            sleep 2
+          done
+  
+          echo "Push fallito dopo 3 tentativi."
+          exit 1
