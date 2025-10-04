@@ -22,8 +22,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p data
-          curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt"  -o data/nasdaqlisted.txt
-          curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"   -o data/otherlisted.txt
+          echo "→ Tentativo da Nasdaq FTP..."
+          if ! curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" -o data/nasdaqlisted.txt; then
+            echo "⚠️  FTP fallito, uso mirror GitHub"
+            curl -fsSL "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/nasdaqlisted.txt" -o data/nasdaqlisted.txt
+          fi
+  
+          if ! curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" -o data/otherlisted.txt; then
+            echo "⚠️  FTP fallito, uso mirror GitHub"
+            curl -fsSL "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/otherlisted.txt" -o data/otherlisted.txt
+          fi
 
       - name: Commit & Push (safe rebase)
         shell: bash
