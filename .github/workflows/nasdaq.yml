@@ -17,21 +17,47 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download lists (robusto con fallback)
+      - name: Download lists (mirror-first con fallback e retry)
         shell: bash
         run: |
-          set -euo pipefail
+          set -eo pipefail
           mkdir -p data
-          echo "→ Tentativo da Nasdaq FTP..."
-          if ! curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" -o data/nasdaqlisted.txt; then
-            echo "⚠️  FTP fallito, uso mirror GitHub"
-            curl -fsSL "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/nasdaqlisted.txt" -o data/nasdaqlisted.txt
-          fi
   
-          if ! curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" -o data/otherlisted.txt; then
-            echo "⚠️  FTP fallito, uso mirror GitHub"
-            curl -fsSL "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/otherlisted.txt" -o data/otherlisted.txt
-          fi
+          fetch() {
+            local out="$1"; shift
+            # prova ciascun URL con timeout e retry
+            for u in "$@"; do
+              echo "Provo $u"
+              if curl -fsSL --connect-timeout 10 --max-time 90 \
+                   --retry 3 --retry-all-errors \
+                   -H 'User-Agent: Mozilla/5.0' -H 'Accept: text/plain' \
+                   "$u" -o "$out.tmp"; then
+                # controllo che il file sembri valido (contiene "|")
+                if grep -qE '(^Symbol\|Security Name)|\|' "$out.tmp"; then
+                  mv "$out.tmp" "$out"
+                  echo "OK da $u"
+                  return 0
+                fi
+              fi
+            done
+            rm -f "$out.tmp" 2>/dev/null || true
+            echo "⚠️ Tutte le sorgenti fallite per $out (mantengo il file precedente se esiste)"
+            # non fallisce il job: continua comunque
+            return 0
+          }
+  
+          # nasdaqlisted
+          fetch data/nasdaqlisted.txt \
+            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/nasdaqlisted.txt" \
+            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" \
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt"
+  
+          # otherlisted
+          fetch data/otherlisted.txt \
+            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/otherlisted.txt" \
+            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" \
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt"
+
 
       - name: Commit & Push (safe rebase)
         shell: bash
