@@ -1,9 +1,9 @@
 name: Nasdaq Mirror
 
 on:
-  workflow_dispatch:   # permette di lanciarlo manualmente
+  workflow_dispatch:   # puoi lanciarlo a mano
   schedule:
-    - cron: '0 */6 * * *'   # gira ogni 6 ore
+    - cron: '0 */6 * * *'   # ogni 6 ore
 
 jobs:
   mirror:
@@ -17,15 +17,18 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Create data dir
+        run: mkdir -p data
+
       - name: Fetch Nasdaq Listed
         run: |
-          curl -s https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt -o nasdaqlisted.txt
-          curl -s https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt -o otherlisted.txt
+          curl -s https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt -o data/nasdaqlisted.txt
+          curl -s https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt -o data/otherlisted.txt
 
       - name: Commit and push if changed
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add nasdaqlisted.txt otherlisted.txt
+          git add data/nasdaqlisted.txt data/otherlisted.txt
           git diff --cached --quiet || git commit -m "Update Nasdaq lists"
           git push
