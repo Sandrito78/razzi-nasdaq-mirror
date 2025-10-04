@@ -1,34 +1,47 @@
 name: Nasdaq Mirror
 
 on:
-  workflow_dispatch:   # puoi lanciarlo a mano
+  workflow_dispatch:        # avvio manuale
   schedule:
-    - cron: '0 */6 * * *'   # ogni 6 ore
+    - cron: "0 */6 * * *"   # ogni 6 ore (regola tu)
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
+        uses: actions/checkout@v4
 
       - name: Create data dir
         run: mkdir -p data
 
-      - name: Fetch Nasdaq Listed
+      - name: Download lists (robusto + fallback + sanity-check)
+        shell: bash
         run: |
-          curl -s https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt -o data/nasdaqlisted.txt
-          curl -s https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt -o data/otherlisted.txt
+          set -euo pipefail
+          UA="Mozilla/5.0 (compatible; RazziBot/1.0)"
+          dl () {  # $1=url, $2=out
+            echo "→ $1 -> $2"
+            curl -fsSL --retry 4 --retry-delay 2 --max-time 60 \
+                 -H "User-Agent: $UA" -H "Cache-Control: no-cache" \
+                 "$1" -o "$2"
+          }
+
+          # Preferisci /files/; fallback su /dynamic/ se serve
+          dl "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt" data/nasdaqlisted.txt \
+          || dl "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" data/nasdaqlisted.txt
+
+          dl "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt" data/otherlisted.txt \
+          || dl "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" data/otherlisted.txt
+
+          # Sanity: devono avere molte righe (evita HTML/errore)
+          test $(wc -l < data/nasdaqlisted.txt) -gt 500
+          test $(wc -l < data/otherlisted.txt)   -gt 500
 
       - name: Commit and push if changed
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.email "actions@github.com"
+          git config --local user.name  "GitHub Actions"
           git add data/nasdaqlisted.txt data/otherlisted.txt
-          git diff --cached --quiet || git commit -m "Update Nasdaq lists"
+          git diff --cached --quiet || git commit -m "Update Nasdaq SymbolDirectory"
           git push
