@@ -81,8 +81,18 @@ jobs:
           echo "📦 Dimensioni finali:"
           ls -lh data/*.txt || true
 
-      - name: Debug – mostro nasdaq.yml
-        run: sed -n '1,180p' .github/workflows/nasdaq.yml
+            - name: Debug – mostra workflow caricato
+        run: sed -n '1,220p' .github/workflows/nasdaq.yml
+
+      - name: Debug – cerca ftp nel workflow
+        run: |
+          echo "🔎 Cerco 'ftp.nasdaqtrader.com' nel workflow…"
+          if grep -R "ftp.nasdaqtrader.com" -n .github/workflows/nasdaq.yml; then
+            echo "❌ TROVATO ftp.nasdaqtrader.com nel file: rimuovilo!"
+            exit 1
+          else
+            echo "✅ Nessun ftp nel workflow"
+          fi
 
       - name: Commit & Push (safe rebase)
         shell: bash
