@@ -16,6 +16,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Debug – curl -I
+        run: |
+          set -u -o pipefail
+          for u in \
+            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/nasdaqlisted.txt" \
+            "https://raw.githubusercontent.com/Sandrito78/razzi-nasdaq-mirror/main/data/otherlisted.txt" \
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/nasdaqlisted.txt" \
+            "https://www.nasdaqtrader.com/files/SymbolDirectory/otherlisted.txt" \
+            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" \
+            "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"
+          do
+            echo ">>> $u"
+            curl -I --connect-timeout 10 --max-time 20 "$u" || echo "(fallito)"
+            echo
+          done
+
 
       - name: Download lists (mirror-first con fallback e retry)
         shell: bash
