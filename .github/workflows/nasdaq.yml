@@ -1,41 +1,39 @@
 name: Nasdaq Mirror
 
-permissions:
-  contents: write
-
 on:
-  workflow_dispatch:        # avvio manuale
+  workflow_dispatch:       # avvio manuale
   schedule:
-    - cron: "0 */6 * * *"   # ogni 6 ore (regola tu)
+    - cron: "0 */6 * * *"  # ogni 6 ore (riduci lo spam; cambia se vuoi)
+
+permissions:
+  contents: write          # << chiave: serve per poter fare push
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download lists (robusto con fallback)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt"  -o data/nasdaqlisted.txt
+          curl -fsSL "https://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"   -o data/otherlisted.txt
+
+      - name: Commit & Push (if changed)
+        shell: bash
         run: |
           set -e
-          curl -sL "http://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" -o nasdaqlisted.txt || true
-          curl -sL "http://ftp.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" -o otherlisted.txt || true
-          # se FTP non va, prova HTTPS (alcune reti lo preferiscono)
-          if [ ! -s nasdaqlisted.txt ]; then
-            curl -sL "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt" -o nasdaqlisted.txt || true
+          if git diff --quiet --exit-code -- data/ ; then
+            echo "No changes."; exit 0
           fi
-          if [ ! -s otherlisted.txt ]; then
-            curl -sL "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt" -o otherlisted.txt || true
-          fi
-
-      - name: Commit & Push
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add nasdaqlisted.txt otherlisted.txt
-          git commit -m "Mirror update" || echo "No changes"
-          git push origin HEAD:main
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/nasdaqlisted.txt data/otherlisted.txt
+          git commit -m "Mirror update $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push
